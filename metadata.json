@@ -1,0 +1,5 @@
+{
+  "name": "AmbAudio - Client-Side Audio Converter",
+  "description": "Convert WAV and FLAC files to high-quality MP3 or Opus directly in your browser using WebAssembly. Batch processing supported.",
+  "requestFramePermissions": []
+}
