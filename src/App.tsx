@@ -51,62 +51,60 @@ export default function App() {
 
   useEffect(() => {
     loadFFmpeg();
+    return () => {
+      // Cleanup on unmount
+      try {
+        ffmpegRef.current.terminate();
+      } catch (e) {}
+    };
   }, []);
 
   const loadFFmpeg = async () => {
     setLoadError(null);
     setLoadProgress(0);
     setIsStuck(false);
+    setIsReady(false);
     
-    // Use latest stable version
     const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
     const ffmpeg = ffmpegRef.current;
     
+    // If already loaded, terminate first to get a fresh start
+    try {
+      ffmpeg.terminate();
+    } catch (e) {}
+
     ffmpeg.on('log', ({ message }) => {
-      console.log('[FFmpeg Log]', message);
+      console.log('[AmbAudio Log]', message);
     });
 
-    // Timeout detection (15 seconds)
     const timeoutId = setTimeout(() => {
-      if (!isReady) {
-        setIsStuck(true);
-      }
+      if (!isReady) setIsStuck(true);
     }, 15000);
 
     try {
-      console.log('Starting FFmpeg load...');
-      console.log('SharedArrayBuffer status:', !!window.SharedArrayBuffer);
-      
-      if (!window.SharedArrayBuffer) {
-        console.warn('SharedArrayBuffer is missing. This is likely why it is stuck.');
-      }
-
-      const progressInterval = setInterval(() => {
-        setLoadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 2;
-        });
-      }, 300);
-
       await ffmpeg.load({
         coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
       });
       
       clearTimeout(timeoutId);
-      clearInterval(progressInterval);
       setLoadProgress(100);
       setIsReady(true);
       setIsStuck(false);
-      console.log('FFmpeg loaded successfully!');
     } catch (err) {
       clearTimeout(timeoutId);
       console.error('Failed to load FFmpeg:', err);
-      setLoadError('Koneksi gagal atau fitur browser diblokir.');
+      setLoadError('Gagal memuat engine. Klik Reset untuk mencoba lagi.');
     }
+  };
+
+  const resetEngine = () => {
+    setIsReady(false);
+    loadFFmpeg();
+  };
+
+  const clearFiles = () => {
+    setFiles([]);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,6 +118,8 @@ export default function App() {
       }));
       setFiles(prev => [...prev, ...newFiles]);
     }
+    // Reset input value so same file can be selected again
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const removeFile = (id: string) => {
@@ -244,10 +244,10 @@ export default function App() {
               <div className="flex items-center gap-3">
                 <span className="text-[10px] text-red-400 font-medium max-w-[200px] truncate">{loadError}</span>
                 <button 
-                  onClick={loadFFmpeg}
+                  onClick={resetEngine}
                   className="text-[10px] bg-red-500/20 hover:bg-red-500/30 text-red-400 px-2 py-1 rounded border border-red-500/30 transition-colors"
                 >
-                  Retry
+                  Reset Engine
                 </button>
               </div>
             )}
@@ -268,9 +268,18 @@ export default function App() {
               </div>
             )}
             {isReady && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 rounded-full border border-emerald-500/20">
-                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-xs font-medium text-emerald-400">Engine Ready</span>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={resetEngine}
+                  className="text-[10px] text-white/40 hover:text-white/60 transition-colors"
+                  title="Reload FFmpeg Engine"
+                >
+                  Reset Engine
+                </button>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 rounded-full border border-emerald-500/20">
+                  <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                  <span className="text-xs font-medium text-emerald-400">Engine Ready</span>
+                </div>
               </div>
             )}
           </div>
@@ -410,6 +419,18 @@ export default function App() {
 
         {/* File List */}
         <div className="space-y-4">
+          {files.length > 0 && (
+            <div className="flex items-center justify-between px-2 mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">Queue ({files.length})</h3>
+              <button 
+                onClick={clearFiles}
+                className="text-[10px] font-bold text-red-400/60 hover:text-red-400 transition-colors flex items-center gap-1"
+              >
+                <X className="w-3 h-3" />
+                Clear All
+              </button>
+            </div>
+          )}
           <AnimatePresence mode="popLayout">
             {files.map((file) => (
               <motion.div
