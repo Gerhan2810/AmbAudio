@@ -128,40 +128,53 @@ export default function App() {
 
   const convertFile = async (audioFile: AudioFile) => {
     const ffmpeg = ffmpegRef.current;
-    const inputName = audioFile.file.name;
-    const outputName = inputName.replace(/\.[^/.]+$/, "") + `.${format}`;
+    
+    // Sanitize filenames for FFmpeg's virtual file system to avoid errors with spaces/special chars
+    const fileExt = audioFile.file.name.split('.').pop();
+    const inputName = `input_${audioFile.id}.${fileExt}`;
+    const outputName = `output_${audioFile.id}.${format}`;
+    const finalDownloadName = audioFile.file.name.replace(/\.[^/.]+$/, "") + `.${format}`;
 
     setFiles(prev => prev.map(f => f.id === audioFile.id ? { ...f, status: 'converting', progress: 0 } : f));
 
     try {
-      await ffmpeg.writeFile(inputName, await fetchFile(audioFile.file));
+      console.log(`[AmbAudio] Processing: ${audioFile.file.name}`);
+      
+      // Write file to virtual FS
+      const fileData = await fetchFile(audioFile.file);
+      await ffmpeg.writeFile(inputName, fileData);
       
       ffmpeg.on('progress', ({ progress }) => {
         setFiles(prev => prev.map(f => f.id === audioFile.id ? { ...f, progress: Math.round(progress * 100) } : f));
       });
 
-      // FFmpeg command logic
       const args = ['-i', inputName];
 
       if (bitrate === 'auto') {
         if (format === 'mp3') {
-          // -q:a 0 is the highest quality VBR for MP3
-          args.push('-q:a', '0');
+          // -q:a 0: Highest quality VBR
+          // -id3v2_version 3: Best compatibility for Japanese characters (UTF-16)
+          args.push('-codec:a', 'libmp3lame', '-q:a', '0', '-id3v2_version', '3', '-write_id3v1', '1');
         } else {
-          // Opus defaults to high quality VBR if no bitrate is specified
-          // but we can explicitly set a high VBR target
-          args.push('-vbr', 'on', '-compression_level', '10');
+          // Opus high-fidelity settings
+          args.push('-codec:a', 'libopus', '-vbr', 'on', '-compression_level', '10', '-frame_size', '20');
         }
       } else {
         args.push('-b:a', bitrate);
+        if (format === 'mp3') args.push('-id3v2_version', '3');
       }
 
       args.push('-map_metadata', '0', outputName);
 
-      await ffmpeg.exec(args);
+      console.log('[AmbAudio] Executing FFmpeg with args:', args);
+      const result = await ffmpeg.exec(args);
+      
+      if (result !== 0) {
+        throw new Error(`FFmpeg process exited with code ${result}`);
+      }
 
       const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([data], { type: format === 'mp3' ? 'audio/mpeg' : 'audio/ogg' });
+      const blob = new Blob([data as Uint8Array], { type: format === 'mp3' ? 'audio/mpeg' : 'audio/ogg' });
       const url = URL.createObjectURL(blob);
 
       setFiles(prev => prev.map(f => f.id === audioFile.id ? { 
@@ -169,12 +182,22 @@ export default function App() {
         status: 'completed', 
         progress: 100, 
         outputUrl: url, 
-        outputName,
+        outputName: finalDownloadName,
         outputSize: blob.size
       } : f));
+
+      // Cleanup virtual FS to save memory
+      await ffmpeg.deleteFile(inputName);
+      await ffmpeg.deleteFile(outputName);
+      console.log(`[AmbAudio] Successfully converted: ${finalDownloadName}`);
+      
     } catch (err) {
-      console.error(err);
-      setFiles(prev => prev.map(f => f.id === audioFile.id ? { ...f, status: 'error', error: 'Conversion failed' } : f));
+      console.error('[AmbAudio] Conversion Error:', err);
+      setFiles(prev => prev.map(f => f.id === audioFile.id ? { 
+        ...f, 
+        status: 'error', 
+        error: err instanceof Error ? err.message : 'Conversion failed' 
+      } : f));
     }
   };
 
