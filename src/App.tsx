@@ -18,8 +18,7 @@ import {
   Loader2,
   Music,
   ChevronRight,
-  Play,
-  X
+  Play
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 
